@@ -97,7 +97,7 @@ void LaunchGamecubeDisc(void)
 	throw "launching BC failed(" + std::to_string(ret) + ")";
 }
 
-void LaunchWiiDisc(void)
+void LaunchWiiDisc(bool hai)
 {
 	DVDTableOfContent* tableOfContent = NULL;
 	DVDPartitionInfo* partitionsInfo = NULL;
@@ -175,7 +175,7 @@ void LaunchWiiDisc(void)
 	memset(rTMD, 0, 0x190);
 
 	//reloading IOS not right yet, DI stuff fail afterwards :/
-	if (IOS_GetVersion() != requiredIOS)
+	if (!hai && IOS_GetVersion() != requiredIOS)
 	{
 		gprintf("reloading ios");
 
@@ -326,7 +326,7 @@ void LaunchWiiDisc(void)
 	DVDCloseHandle();
 }
 
-void BootDiscContent(void)
+void BootDiscContent(bool hai)
 {
 	ClearScreen();
 	PrintFormat(1, TEXT_OFFSET("Loading DVD..."), 208, "Loading DVD...");
@@ -365,7 +365,7 @@ void BootDiscContent(void)
 		if (*((u32*)0x80000018) != WIIDVD_MAGIC_VALUE)
 			throw "Unknown Disc inserted.";
 
-		LaunchWiiDisc();
+		LaunchWiiDisc(hai);
 	}
 	catch (const std::string& ex)
 	{

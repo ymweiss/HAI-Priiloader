@@ -1,50 +1,39 @@
-<p align="center" width="100%">
-  <img width="720" alt="fidget spinner" src="https://raw.githubusercontent.com/DacoTaco/priiloader/master/Images/Logo.png">
-</p>
+# What is HAI-Priiloader? #
+This is an in-progress modification of [Priiloader](http://wiibrew.org/wiki/Priiloader) that retains all standard Priiloader features and enables autobooting an arbitrary vWii channel, irrespective of the injected iso being used. \
+This is intended to only be used on vWii. Use [Priiloader](https://github.com/DacoTaco/priiloader) on a Wii (mini)
 
----
+## Requirements to Install ##
+An installed wii vc title (original or injection).
+A way to launch FTPiiU Everywhere on the Wii U and a FTP client installed on a pc.
+Open Homebrew Channel. FIx94's version with gamepad support is strongly recommended.
 
-# What is Priiloader? #
+## Installation instructions ##
+It is strongly recommended to create a NAND backup before proceeding with the installation.
+1. Follow the priiloader installation instructions to copy all needed files to the sd card. 
+2. Replace priiloader's boot.dol with HAI-Priiloader's boot.dol (not included in this preliminary version)
+3. Run the dol from the Open Homebrew Channel
 
-[Priiloader](http://wiibrew.org/wiki/Priiloader) is a heavily modified version of [Preloader 0.30](http://wiibrew.org/wiki/Preloader), created by [DacoTaco](http://wiibrew.org/wiki/User:DacoTaco) and BadUncle.<br>It is an application that is loaded prior to the Wii System Menu, which allows it to fix certain kinds of bricks that leave the System Menu in a broken state (like a banner brick), or to add various patches like update blockers or Wiimmfi patches to the System Menu. 
+## ANCAST image replacement ##
+In this step the COMPAT-BS ANCAST image will be replaced with the BC-NAND ANCAST image. \
+The BC-NAND ANCAST image is part of vWii title 0000000700000200 It can be obtained by using FTPiiU Everywhere to copy it from vWii. \
+The image must be trimmed. Everything before the magic (0xEFA282D9) must be removed. \
+Replace boot.bin located in OSv1 with the trimmed BC-NAND (renamed to boot.bin).
 
-**Quick note: Priiloader will _NOT_ save your Wii if you fucked up the System Menu IOS!**  
-**_(On 4.3 this is IOS80) [See here](http://wiibrew.org/wiki/IOS_History) to check which IOS that is for you._**
-## What has been changed since Preloader 0.30 base source? #
+## fw.img patches ##
+Use fix94's fork of nfs2iso2nfs with the --homebrew option. \
+The patches for setting the titleID to boot and the aspect ratio are not yet included in nfs2iso2nfs. \
+They must be manually applied to fw.img \
+Note: The default behavior is to boot the virtual disk without enabling 4:3 aspect ratio. Manual patches are not required for this case. \
+Replace the contents of the 9 bytes starting from address 0x0015D7C3 in revision r590 with [titleID,boot4by3]
 
-  * Added vWii and Wii Mini support
-  * Added Bootmii IOS booting option to menu and autoboot (handy for restoring and/or sneek)
-  * Support for all HBC title IDs
-  * Removed need for ES\_DIVerify
-  * Killed the DVD spin bug (crediar forgot to close the dvd drive in ios)
-  * Re-added online updating
-  * Added our own installer (phpgeek's)
-  * Re-added the old black theme
-  * Added a check on boot so some apps can reboot/launch system menu and force priiloader to show up or start system menu
-  * Added start of Wiiware/VC titles
-  * HBC stub loading 
-  * Hacks can either be added with their offset, or with a hash value to allow for version-agnostic patches
-  * Added option to require a password at boot
-  * Fixed lot and lots of bugs
-  * Much much MUCH more...
+## Important ##
+If HAI-priiloader is uninstalled for any reason booting any VC inject produces a black screen. \
+HAI-priiloader must be reinstalled or the ANCAST image replacement must be reversed for VC injects to work again.
 
 
-## What do I need to install Priiloader? #
+## Thanks ##
+DacoTaco for priiloader \
+Fix94 for wiivc_chan_booter, libwiidrc, OHBC modifications
 
-**All you need is a way of booting homebrew. (Homebrew Channel recommended)**  
-If you have The Homebrew Channel 1.0.7 or above, you don't need any patched IOS at all!  
-If you don't, then a patched IOS36 is required. (*Although it is recommended to just update the HBC.*)
-
-Priiloader itself needs no hacked IOS at all. (Hell, we recommend using unpatched IOS...)
-
-## Can I contact you guys elsewhere? #
-Yes, you can! You can find me (@DacoTaco) in `#priiloader` and `#wiidev` on efnet.org, or on [Github](https://github.com/DacoTaco). 
-
-## I need more info?
-That is not a real question, but here:
-* [Priiloader FAQ](./docs/FAQ.md)
-* [About Hacks](./docs/HACKS.md)
-* [Hacks Testing](https://github.com/DacoTaco/priiloader/discussions/354)
-
-## ☕Donations
-If you like Priiloader and wish to support me you can donate on [ko-fi](https://ko-fi.com/dacotaco)
+## ☕Donations ##
+Feel free to donate to Dacotaco on [ko-fi](https://ko-fi.com/dacotaco) 

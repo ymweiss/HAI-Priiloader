@@ -72,6 +72,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "rapidxml_utils.hpp"
 #include "SystemMenu.h"
 #include "vWii.h"
+#include "boot.h"
 
 //loader files
 #include "patches.h"
@@ -1272,13 +1273,13 @@ s8 BootDolFromFile( const char* Dir , u8 HW_AHBPROT_ENABLED,const std::vector<st
 
 	return ret;
 }
-void BootDvdDrive(void)
+void BootDvdDrive(bool hai)
 {
 	Input_Shutdown();
 	ShutdownMounts();
 	USB_Deinitialize();
 
-	BootDiscContent();
+	BootDiscContent(hai);
 
 	//well that failed
 	error = ERROR_DVD_BOOT_FAILURE;
@@ -2350,7 +2351,8 @@ void HandleWiiMoteEvent(s32 chan)
 }
 void Autoboot_System( void )
 {
-  	if( SGetSetting(SETTING_PASSCHECKMENU) && SGetSetting(SETTING_AUTBOOT) != AUTOBOOT_DISABLED && SGetSetting(SETTING_AUTBOOT) != AUTOBOOT_ERROR )
+	
+	if( SGetSetting(SETTING_PASSCHECKMENU) && SGetSetting(SETTING_AUTBOOT) != AUTOBOOT_DISABLED && SGetSetting(SETTING_AUTBOOT) != AUTOBOOT_ERROR )
  		password_check();
 
 	switch( SGetSetting(SETTING_AUTBOOT) )
@@ -2409,6 +2411,197 @@ void ClearMagicWord( void )
 	return;
 }
 
+
+static inline bool apply_patch(const char *name, const u8 *old, const u8 *patch, u32 size)
+{
+	u8 i;
+	u32 found = 0;
+	u8 *ptr = (u8*)0x93400000;
+
+	u32 level = IRQ_Disable();
+	while((u32)ptr < (u32)0x94000000)
+	{
+		if(memcmp(ptr, old, size) == 0)
+		{
+			for(i = 0; i < size; ++i)
+				*(vu8*)(ptr+i) = *(vu8*)(patch+i);
+			found++;
+		}
+		ptr++;
+	}
+	IRQ_Restore(level);
+
+	//printf("patched %s %lu times.\n", name, found);
+	return (found > 0);
+}
+
+#define ES_STACK_END 0x20112620
+#define ES_MODULE_SIZE 0x10000
+#define ES_MODULE_START (u8*)0x138f0000
+
+
+//part will be repurposed to store configuration information (title to boot, aspect ratio)
+//system menu titleID indicates boot disk
+//all 0 titleID indicates boot OHBC
+/*
+	struct
+	{
+		u8 upper[15],
+		u8 titleId[8],
+		u8 boot4by3
+	} meta;
+*/
+
+void getConfig(u64* titleID, bool* boot4by3)
+{
+	const u8 nintendont2[20] = {0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23, 0x01, 0x46, 0xC0, 0x46, 0xC0};
+	const u8 retained_patch[15] = {0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23};
+	u8* addr;
+	for (addr= (u8*)0x93400000;(u32)addr < (u32)0x94000000;addr++) {
+		if (!memcmp(addr, retained_patch, sizeof(retained_patch))) {
+			//ensure compatibility with the legacy homebrew setup
+			if (!memcmp(addr, nintendont2, sizeof(nintendont2)))
+			{
+				*titleID = 0x0000000100000002;
+				*boot4by3 = 0;
+			}
+			//copy the embedded titleID and boot4by3 configuration
+			else
+			{
+				memcpy(titleID,addr+15,8);
+				*boot4by3 = addr[23];
+				//restore the full nintendont patch
+				memcpy(addr+15,nintendont2+15,5);
+				DCFlushRange((void*)((u32)addr&~0x1F), 32);
+			}
+			return;
+		}
+	}
+	//ensure compatibility with legitimate  titles and injects of disk titles
+	*titleID = 0x0000000100000002;
+	*boot4by3 = 0;
+}
+
+//taken from Riivolution for loading additional IOS modules
+//does not work when nintendont patches are applied
+//TODO: decouple nintendont patches from homebrew, only applying nintendont patches for nintendont forwarders
+int load_module_file(s32 fd, const char *filename)
+{
+	const u8 nintendont2[20] = {0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23, 0x01, 0x46, 0xC0, 0x46, 0xC0};
+	const u8 retained_patch[15] = {0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23};
+
+	const u8 old_es_code[24] = {
+		0x68, 0x4B, 0x2B, 0x06, 0xD1, 0x0C, 0x68, 0x8B, 0x2B, 0x00,
+		0xD1, 0x09, 0x68, 0xC8, 0x68, 0x42, 0x23, 0xA9, 0x00, 0x9B,
+		0x42, 0x9A, 0xD1, 0x03};
+	const u8 retained_Code[15] = {
+		0x68, 0x4B, 0x2B, 0x06, 0xD1, 0x0C, 0x68, 0x8B, 0x2B, 0x00,
+		0xD1, 0x09, 0x68, 0xC8, 0x68};
+
+	const u16 load_module[12] =
+	{
+		0x68CE, // ldr r6, [r1, #0x0c]	; ipcmessage.vec
+		0x6830, // ldr r0, [r6]			; vec[0].data (filename of module)
+		0x4778, // thumb->arm (BX PC)
+		0x46C0, // nop (for alignment, assumes this block starts 4-byte aligned)
+		0xE600,	0x0B50, // syscall_5a (load_ios_module)
+		0xE28D,	0xD020, // ADD SP, SP, #0x20
+		0xE8BD,	0x4070, // LDMFD SP!,{R4-R6,LR}
+		0xE12F,	0xFF1E, // BX LR
+	};
+	
+
+	u8 *addr;
+	s32 ret=1;
+	ioctlv vec;
+
+	vec.data = (void*)filename;
+	vec.len = strlen(filename)+1;
+	u32 level = IRQ_Disable();
+	for (addr= (u8*)0x93400000;(u32)addr < (u32)0x94000000; addr++) {
+		//only apply when nintendont patches are not applied
+		//retained_code should be present
+		if (!memcmp(addr,retained_code,sizeof(retained_code)))
+		{
+			PrintFormat(0,16,rmode->viHeight-54, "patching ES");
+			memcpy(addr, load_module, sizeof(load_module));
+			DCFlushRange((void*)((u32)addr&~0x1F), 32);
+			//verify code was written correctly
+			if (memcmp(addr,load_module,sizeof(load_module)))
+			{
+				PrintFormat(0,16,rmode->viHeight-54, "failed to patch ES");
+				sleep(1);
+				return 0;
+			}
+			vec.data = (void*)filename;
+			vec.len = strlen(filename)+1;
+			ret = IOS_Ioctlv(fd, 0x1F, 1, 0, &vec);
+			// restore old_es_code
+			memcpy(addr, old_es_code, sizeof(old_es_code));
+			DCFlushRange((void*)((u32)addr&~0x1F), 32);
+			IRQ_Restore(level);
+			return !ret;
+		}
+	}
+	IRQ_Restore(level);
+	return !ret;
+}
+
+void HAIboot()
+{
+	PrintFormat(0,16,rmode->viHeight-36, "HAI-IOS detected");
+	sleep(1);
+	//load stock IOS modules not included in HAI-IOS
+	//currently used to load the SSL module
+	u64 titleID = 0;
+	bool boot4by3 = 0;
+	s32 fd = IOS_Open("/dev/es", 0);
+	getConfig(&titleID, &boot4by3);
+	//PrintFormat(0,16,rmode->viHeight-54, "successfully read config");
+	sleep(1);
+	int temp = load_module_file(fd, "/shared1/00000028.app");
+	IOS_Close(fd);
+	temp = IOS_Open("/dev/net/ssl",0);
+	if (temp)
+	{
+		PrintFormat(0,16,rmode->viHeight-54, "SSL module loaded");
+		IOS_Close(temp);
+	}
+	sleep(1);
+	//gprintf("HAI-IOS detected");
+	//boot the specified title with the specified aspect ratio
+	//u64 titleId = 0;
+	//autoboot the disk
+	if (titleID == 0x0000000100000002)
+	{
+		PrintFormat(0,16,rmode->viHeight-72, "booting disk title");
+		sleep(1);
+		BootDvdDrive(true);
+	}
+	else if (titleID == 0)
+	{
+		title_info title = { 0x00,"None"};
+		s32 ret = DetectHBC(&title);
+		if(ret >= 0 && title.title_id != 0x00)
+		{
+			//gprintf("LoadHBC : %s detected",title.name_ascii.c_str());
+			PrintFormat(0,16,rmode->viHeight-72, "homebrew channel detected with id %lx", title.title_id);
+			titleID = title.title_id;
+		}
+	}
+	//boot the detected homebrew channel installation or the arbitrary title
+	int res = bootChannel(titleID, boot4by3);
+	//failed to launch
+	PrintFormat(0,16,rmode->viHeight-144, "error booting title, exited with code %d", res);
+	sleep(1);
+	
+	
+	//gprintf("error booting homebrew channel");
+	//BootDvdDrive(true);
+	//PrintFormat(0,16,rmode->viHeight-90, "error booting DVD drive");
+	//sleep(5);
+}
+
 int main(int argc, char **argv)
 {
 	CheckForGecko();
@@ -2435,7 +2628,7 @@ int main(int argc, char **argv)
 	*(vu32*)0x8000311C = 0x04000000;				// Console Simulated Mem2 Size
 
 	*(vu32*)0x80003120 = 0x93400000;				// MEM2 end address ?*/
-
+	bool hai = false;
 	s32 r = ISFS_Initialize();
 	if( r < 0 )
 	{
@@ -2444,7 +2637,6 @@ int main(int argc, char **argv)
 	}
 
 	AddMem2Area (14*1024*1024, OTHER_AREA);
-	LoadHBCStub();
 	gprintf("\"Magic Priiloader word\": %x - %x",*(vu32*)MAGIC_WORD_ADDRESS_2 ,*(vu32*)MAGIC_WORD_ADDRESS_1);
 
 	bool isFirstTimeUse = LoadSettings() == LOADSETTINGS_INI_CREATED;
@@ -2454,7 +2646,7 @@ int main(int argc, char **argv)
 	}
 
 	SetDumpDebug(SGetSetting(SETTING_DUMPGECKOTEXT));
-	s16 Bootstate = CheckBootState();
+	s16 Bootstate  = CheckBootState();
 	u32 GcShutdownFlag = *(u32*)0x80003164;
 	gprintf("BootState:%d", Bootstate );
 	memset(&system_state,0,sizeof(wii_state));
@@ -2463,8 +2655,37 @@ int main(int argc, char **argv)
 	gprintf("Bootstate %u detected. DiscState %u ,ReturnTo %u & Flags %u & checksum %u (gcflag : 0x%08X)", flags.type, flags.discstate, flags.returnto, flags.flags, flags.checksum, GcShutdownFlag);
 	s8 magicWord = CheckMagicWords();
 
+
+	//init video here
+	InitVideo();
+	ClearScreen();
+	//check for HAI-IOS
+	PrintFormat( 0, 16, rmode->viHeight-18, "checking IOS version");
+	sleep(1);
+	//gprintf("checking IOS version");
+	vu32 IOS_ver = (*(vu32*)0x80003140)>>16;
+	//if (IOS_ver == 1 || IOS_ver == 56 || IOS_GetRevision() == 590 || IOS_ver != 58) //&& (IOS_GetRevision() == 569 || IOS_GetRevision() == 570 || IOS_GetRevision() == 590))
+	s32 state = IOS_Open("/dev/net/ssl", 0);
+	
+	if (state < 0)
+	{
+		//perform a special boot procedure is booting from a Wii VC inject
+		PrintFormat( 0, 16, rmode->viHeight-18, "No SSL module found");
+		sleep(1);
+		hai = true;
+		HAIboot();	
+	}
+	else
+	{
+		IOS_Close(state);
+	}
+	LoadHBCStub(); //problem?
 	if (CheckvWii())
 	{
+		
+		//HAI-IOS tmd is modified to report IOS 1
+		//first enable shutdown by pressing the power button
+
 		ImportWiiUConfig();
 		const WiiUConfig* wiiuConfig = GetWiiUConfig();
 
@@ -2517,7 +2738,8 @@ int main(int argc, char **argv)
 	//Give keyboard stack enough time to detect a keyboard and poll it. (~0.2s delay)
 	usleep(500000);
 	Input_ScanPads();
-	
+
+
 	//Check reset button state, boot to priiloader if first time
 	if(!isFirstTimeUse && ((Input_ButtonsDown() & INPUT_BUTTON_B) == 0) && RESET_UNPRESSED == 1 && magicWord == 0)
 	{
@@ -2660,7 +2882,7 @@ int main(int argc, char **argv)
 	gprintf("FAT_Init():%d", GetMountedFlags());
 
 	//init video first so we can see crashes :)
-	InitVideo();
+	//InitVideo();
   	if( SGetSetting(SETTING_PASSCHECKPRII) )
  		password_check();
 
@@ -2717,7 +2939,7 @@ int main(int argc, char **argv)
 					LoadListTitles();
 					break;
 				case 4: //Launch Disc
-					BootDvdDrive();
+					BootDvdDrive(false);
 					break;
 				case 5:	//load main.bin from /title/00000001/00000002/data/ dir
 					AutoBootDol();
@@ -2792,7 +3014,23 @@ int main(int argc, char **argv)
 
 		if( redraw )
 		{
-			PrintFormat( 0, 16, rmode->viHeight-96, "IOS v%d", (*(vu32*)0x80003140)>>16 );
+			vu32 IOSver = (*(vu32*)0x80003140)>>16;
+			if (IOSver == 56 && IOS_GetRevision() == 590)
+			{
+				PrintFormat( 0, 16, rmode->viHeight-96, "HAI-IOS v%dr%d", IOSver,  IOS_GetRevision());
+				//HAI mode boot code goes here
+				/*
+				if (hai == false)
+				{
+					hai = true;
+					HAIboot();
+				}
+				*/
+			}
+			else
+			{
+				PrintFormat( 0, 16, rmode->viHeight-96, "IOS v%dr%d", IOSver,  IOS_GetRevision());
+			}
 			PrintFormat( 0, 16, rmode->viHeight-80, "Systemmenu v%d", SysVersion );
 #if VERSION_RC > 0
 			PrintFormat( 0, 16, rmode->viHeight - 64, "Priiloader v%d.%d.%d(RC%d)", VERSION.major, VERSION.minor, VERSION.patch, VERSION.sub_version);

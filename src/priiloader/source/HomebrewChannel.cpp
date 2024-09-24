@@ -20,6 +20,7 @@
 #include "font.h"
 #include "Input.h"
 #include "mount.h"
+#include "boot.h"
 
 //Bin include
 #include "stub_bin.h"
@@ -142,11 +143,13 @@ s32 DetectHBC(title_info* title)
 	mem_free(list);
     if(ret < 0 || ret > HBC_Titles_Size -1)
 	{
+		PrintFormat( 0, 16, rmode->viHeight-72, "DetectHBC: HBC not found ");
 		gprintf("DetectHBC: HBC not found");
 		title = NULL;
 		return -3;
 	}
 	*title = HBC_Titles[ret];
+	PrintFormat( 0, 16, rmode->viHeight-72, "homebrew channel detected ");
 	return ret;
 }
 
@@ -184,6 +187,7 @@ void LoadHBC( void )
 	}
 
 	ES_LaunchTitle(TitleID, &views[0]);
+	
 
 	//well that went wrong
 	if(system_state.Init)

@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <wiikeyboard/usbkeyboard.h>
 #include <sys/time.h>
 #include <sys/unistd.h>
+//#include <wiiuse/wpad.h>
+//#include <wiidrc/wiidrc.h>
 
 #include "Input.h"
 #include "gecko.h"
@@ -145,6 +147,8 @@ s8 Input_Init( void )
 	r |= USB_Initialize();
 	r |= USBKeyboard_Initialize();	
 
+	//initialize using the wii u gamepad
+	//WiiDRCInit();
 	// Even if the thread fails to start, 
 	kbd_should_quit = false;
 	LWP_CreateThread(	&kbd_handle,
@@ -188,6 +192,7 @@ u32 Input_ScanPads( void )
 {
 	WPAD_ScanPads();
 	PAD_ScanPads();
+	//WiiDRC_ScanPads();
 	usleep(800); // Give the keyboard thread a chance to run
 	return 1;
 }
@@ -208,8 +213,34 @@ u32 Input_ButtonsDown( bool _overrideSTM )
 		pressed |= _kbd_pressed;
 		_kbd_pressed = 0;
 	}
+
+	//additional block for checking if used gamepad button was pressed
+	/*
+	else if (WiiDRC_Inited() && WiiDRC_Connected() && (WiiDRC_Data())->button)
+	{
+
+		if (WIIDRC_BUTTON_DOWN)
+			pressed |= INPUT_BUTTON_DOWN;
+		if (WIIDRC_BUTTON_UP)
+			pressed |= INPUT_BUTTON_UP;
+		if (WIIDRC_BUTTON_LEFT)
+			pressed |= INPUT_BUTTON_LEFT;
+		if (WIIDRC_BUTTON_RIGHT)
+			pressed |= INPUT_BUTTON_RIGHT;		
+		if (WIIDRC_BUTTON_A)
+			pressed |= INPUT_BUTTON_A;
+		if (WIIDRC_BUTTON_B)
+			pressed |= INPUT_BUTTON_B;
+		if (WIIDRC_BUTTON_PLUS)
+			pressed |= Input_BUTTON_PLUS
+		if (WIIDRC_BUTTON_X)
+			pressed |= INPUT_BUTTON_X;
+		if (WIIDRC_BUTTON_Y)
+			pressed |= INPUT_BUTTON_Y;	
+	}*/
 	else
 	{
+
 		pressed |= (PAD_ButtonsDown(0) | PAD_ButtonsDown(1) | PAD_ButtonsDown(2) | PAD_ButtonsDown(3));
 		
 		u32 WPAD_Pressed = (WPAD_ButtonsDown(0) | WPAD_ButtonsDown(1) | WPAD_ButtonsDown(2) | WPAD_ButtonsDown(3));
