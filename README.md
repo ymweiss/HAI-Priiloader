@@ -1,6 +1,7 @@
 # What is HAI-Priiloader? #
-This is an in-progress modification of [Priiloader](http://wiibrew.org/wiki/Priiloader) that retains all standard Priiloader features and enables autobooting an arbitrary vWii channel, irrespective of the injected iso being used. \
+This is an deprecated modification of [Priiloader](http://wiibrew.org/wiki/Priiloader) that retains all standard Priiloader features and enables autobooting an arbitrary vWii channel, irrespective of the injected iso being used. \
 This is intended to only be used on vWii. Use [Priiloader](https://github.com/DacoTaco/priiloader) on a Wii (mini)
+Due to HAI-IOS limitations, its use is limited to its current state to apply Wiimfi patches to injects by using the disc patcher.
 
 ## Requirements to Install ##
 An installed wii vc title (original or injection).
