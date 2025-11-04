@@ -557,39 +557,26 @@ void BootMainSysMenu( void )
 			{
 				gprintf("ES_Identify failed with error %d", ret);
 
-				// On vWii with cIOS, ES_Identify can fail due to timing issues
+				// ES_Identify can fail when using alternative IOS due to timing issues
+				// This affects both official alternative IOS and cIOS on all platforms
 				// Try using direct NAND access as a fallback (similar to IOS < 28 workaround)
-				if (CheckvWii())
+				gprintf("Attempting NAND access fallback for alternative IOS");
+				s32 currentIOS = IOS_GetVersion();
+				gprintf("Current IOS: %d", currentIOS);
+
+				s32 patch_ret = PatchIOS({ NandAccessPatcher });
+				if (patch_ret > 0)
 				{
-					gprintf("vWii detected - attempting NAND access fallback");
-					s32 currentIOS = IOS_GetVersion();
-					if (currentIOS >= 200)
-					{
-						gprintf("cIOS detected (IOS %d) - patching in NAND Access", currentIOS);
-						s32 patch_ret = PatchIOS({ NandAccessPatcher });
-						if (patch_ret > 0)
-						{
-							gprintf("NAND Access patched successfully - bypassing ES_Identify");
-							// Skip ES_Identify - system menu will work with NAND access
-							ret = 0;
-						}
-						else
-						{
-							gprintf("NAND Access patch failed: %d", patch_ret);
-							error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
-							throw ("ES_Identify error " + std::to_string(ret) + " and NAND fallback failed");
-						}
-					}
-					else
-					{
-						error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
-						throw ("ES_Identify error " + std::to_string(ret) + " on vWii (non-cIOS)");
-					}
+					gprintf("NAND Access patched successfully - bypassing ES_Identify");
+					// Skip ES_Identify - system menu will work with direct NAND access
+					// This allows the system menu to load its TMD and content directly
+					ret = 0;
 				}
 				else
 				{
+					gprintf("NAND Access patch failed: %d", patch_ret);
 					error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
-					throw ("ES_Identify error " + std::to_string(ret));
+					throw ("ES_Identify error " + std::to_string(ret) + " and NAND fallback failed");
 				}
 			}
 			else
