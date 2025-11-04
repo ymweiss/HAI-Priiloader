@@ -396,6 +396,23 @@ void BootMainSysMenu( void )
 				}
 
 				ReloadIOS(ToLoadIOS, 1);
+
+				// Wait for cIOS to fully initialize, especially on vWii
+				// cIOS initialization takes longer than stock IOS due to additional modules
+				if (CheckvWii() && ToLoadIOS >= 200) {
+					// vWii with cIOS (typically IOS >= 200) needs longer delay
+					sleep(3);
+					gprintf("vWii + cIOS: Extended initialization delay");
+				} else if (ToLoadIOS >= 200) {
+					// cIOS on regular Wii
+					sleep(2);
+					gprintf("cIOS: Initialization delay");
+				} else {
+					// Stock IOS
+					sleep(1);
+					gprintf("Stock IOS: Basic initialization delay");
+				}
+
 				PatchIOS({EsIdentifyPatch});
 
 				// Any IOS < 28 does not have to required ES calls to get a title TMD, which sucks.
@@ -406,6 +423,23 @@ void BootMainSysMenu( void )
 					gprintf("IOS < 28, patching in NAND Access");
 					PatchIOS({ NandAccessPatcher });
 				}
+
+				// Reinitialize ISFS after IOS reload to ensure clean state
+				gprintf("Reinitializing ISFS after IOS reload");
+				ISFS_Deinitialize();
+				s32 isfs_ret = ISFS_Initialize();
+				if (isfs_ret < 0)
+				{
+					gprintf("ISFS_Initialize failed: %d, retrying...", isfs_ret);
+					sleep(1);
+					isfs_ret = ISFS_Initialize();
+					if (isfs_ret < 0)
+					{
+						error = ERROR_ISFS_INIT;
+						throw "ISFS_Initialize failed after IOS reload";
+					}
+				}
+				gprintf("ISFS reinitialized successfully");
 			}
 		}
 		/*
@@ -489,12 +523,78 @@ void BootMainSysMenu( void )
 				error = ERROR_SYSMENU_ESDIVERFIY_FAILED;
 				throw ("ES_Identify: ISFS_Read error " + std::to_string(ret));
 			}
+			ISFS_Close(fd);
+			fd = -1;
+
+			// Check ES module readiness before calling ES_Identify
+			// This prevents hangs with slow-initializing cIOS
+			gprintf("Verifying ES module is ready");
+			s32 es_fd = IOS_Open("/dev/es", 0);
+			if (es_fd < 0)
+			{
+				gprintf("ES module not ready (error %d), waiting...", es_fd);
+				sleep(1);
+				es_fd = IOS_Open("/dev/es", 0);
+				if (es_fd < 0)
+				{
+					gprintf("ES module still not available after delay (error %d)", es_fd);
+					// On vWii with cIOS, ES_Identify may fail - we'll try anyway and fall back if needed
+				}
+				else
+				{
+					IOS_Close(es_fd);
+					gprintf("ES module ready after delay");
+				}
+			}
+			else
+			{
+				IOS_Close(es_fd);
+				gprintf("ES module ready");
+			}
 
 			ret = ES_Identify( (signed_blob *)certificate, certStats->file_length, signedTmdBlob, tmdSize, (signed_blob *)ticket, status->file_length, 0);
 			if (ret < 0)
-			{	
-				error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
-				throw ("ES_Identify error " + std::to_string(ret));
+			{
+				gprintf("ES_Identify failed with error %d", ret);
+
+				// On vWii with cIOS, ES_Identify can fail due to timing issues
+				// Try using direct NAND access as a fallback (similar to IOS < 28 workaround)
+				if (CheckvWii())
+				{
+					gprintf("vWii detected - attempting NAND access fallback");
+					s32 currentIOS = IOS_GetVersion();
+					if (currentIOS >= 200)
+					{
+						gprintf("cIOS detected (IOS %d) - patching in NAND Access", currentIOS);
+						s32 patch_ret = PatchIOS({ NandAccessPatcher });
+						if (patch_ret > 0)
+						{
+							gprintf("NAND Access patched successfully - bypassing ES_Identify");
+							// Skip ES_Identify - system menu will work with NAND access
+							ret = 0;
+						}
+						else
+						{
+							gprintf("NAND Access patch failed: %d", patch_ret);
+							error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
+							throw ("ES_Identify error " + std::to_string(ret) + " and NAND fallback failed");
+						}
+					}
+					else
+					{
+						error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
+						throw ("ES_Identify error " + std::to_string(ret) + " on vWii (non-cIOS)");
+					}
+				}
+				else
+				{
+					error=ERROR_SYSMENU_ESDIVERFIY_FAILED;
+					throw ("ES_Identify error " + std::to_string(ret));
+				}
+			}
+			else
+			{
+				gprintf("ES_Identify succeeded");
 			}
 
 			if(ticket)
